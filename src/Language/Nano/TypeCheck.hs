@@ -32,11 +32,15 @@ class HasTVars a where
 
 -- | Type variables of a type
 instance HasTVars Type where
-  freeTVars t     = error "TBD: type freeTVars"
+  freeTVars (TVar v)     = [v]
+  freeTVars (t1 :=> t2)  = L.nub (freeTVars t1 ++ freeTVars t2)
+  freeTVars (TList t)    = freeTVars t
+  freeTVars _            = []
 
 -- | Free type variables of a poly-type (remove forall-bound vars)
 instance HasTVars Poly where
-  freeTVars s     = error "TBD: poly freeTVars"
+  freeTVars (Mono t)       = freeTVars t          -- mono type
+  freeTVars (Forall var p) = (freeTVars p) L.\\ [var]   -- poly type
 
 -- | Free type variables of a type environment
 instance HasTVars TypeEnv where
@@ -56,23 +60,38 @@ extendTypeEnv x s gamma = (x,s) : gamma
 -- | Lookup a type variable in a substitution;
 --   if not present, return the variable unchanged
 lookupTVar :: TVar -> Subst -> Type
-lookupTVar a sub = error "TBD: lookupTVar"
+lookupTVar a []            = TVar a
+lookupTVar a ((var, t):xs) = if a == var
+                             then t
+                             else lookupTVar a xs
 
 -- | Remove a type variable from a substitution
 removeTVar :: TVar -> Subst -> Subst
-removeTVar a sub = error "TBD: removeTVar"
+removeTVar a []              = []
+removeTVar a ((var, val):xs) = if a == var
+                               then xs
+                               else (var, val) : removeTVar a xs 
      
 -- | Things to which type substitutions can be apply
 class Substitutable a where
   apply :: Subst -> a -> a
   
 -- | Apply substitution to type
-instance Substitutable Type where  
-  apply sub t         = error "TBD: type apply"
+instance Substitutable Type where 
+  apply sub (TVar v)            = lookupTVar v sub
+  apply sub (TList v)           = TList (apply sub v)
+  apply sub (t1 :=> t2)         = (apply sub t1) :=> (apply sub t2)
+  apply sub t                   = t
+  
 
 -- | Apply substitution to poly-type
 instance Substitutable Poly where    
-  apply sub s         = error "TBD: poly apply"
+  apply [] p               = p
+  apply sub (Mono t)       = Mono (apply sub t)
+  apply sub (Forall var p) = Forall var $ apply newSub p
+                               where newSub = removeTVar var sub
+  apply _ p                = p
+
 
 -- | Apply substitution to (all poly-types in) another substitution
 instance Substitutable Subst where  
@@ -88,8 +107,9 @@ instance Substitutable TypeEnv where
       
 -- | Extend substitution with a new type assignment
 extendSubst :: Subst -> TVar -> Type -> Subst
-extendSubst sub a t = error "TBD: extendSubst"
-      
+extendSubst sub a t = let bind = [(a,t)] in
+                          (apply sub bind) ++ (apply bind sub)
+
 --------------------------------------------------------------------------------
 -- Problem 2: Unification
 --------------------------------------------------------------------------------
@@ -113,21 +133,38 @@ extendState (InferState sub n) a t = InferState (extendSubst sub a t) n
 -- | Unify a type variable with a type; 
 --   if successful return an updated state, otherwise throw an error
 unifyTVar :: InferState -> TVar -> Type -> InferState
-unifyTVar st a t = error "TBD: unifyTVar"
+unifyTVar st a t = case (a, t) of (a, TVar v)  -> if a == v
+                                                  then st
+                                                  else extendState st a t
+                                  (a, TList ts) -> let (InferState sub n) = unifyTVar st a ts in
+                                                      if sub == []
+                                                      then throw ( Error "cannot unify")
+                                                      else extendState st a (TList ts)
+                                  (a, TBool)    -> extendState st a (TBool)
+                                  (a, TInt)     -> extendState st a (TInt)
+                                  (a, (t1 :=> t2))       -> throw ( Error "type error")
     
 -- | Unify two types;
 --   if successful return an updated state, otherwise throw an error
 unify :: InferState -> Type -> Type -> InferState
-unify st t1 t2 = error "TBD: unify"
+unify st t1 t2 = case (t1, t2) of (TInt, TInt)   -> st
+                                  (TInt, _)      -> throw ( Error "type error")
+                                  (TBool, TBool) -> st
+                                  (TBool, _)     -> throw ( Error "type error")
+                                  (TVar v, t)    -> unifyTVar st v t
+                                  (f1 :=> r1, f2 :=> r2) -> throw ( Error "cannot unify")
+                                  (_, f2 :=> r2) -> throw ( Error "cannot unify")
+                                  (f1 :=> r1, _) -> throw ( Error "cannot unify")
+                                  
 
 --------------------------------------------------------------------------------
 -- Problem 3: Type Inference
 --------------------------------------------------------------------------------    
   
 infer :: InferState -> TypeEnv -> Expr -> (InferState, Type)
-infer st _   (EInt _)          = error "TBD: infer EInt"
-infer st _   (EBool _)         = error "TBD: infer EBool"
-infer st gamma (EVar x)        = error "TBD: infer EVar"
+infer st _   (EInt _)          = (st, TInt)
+infer st _   (EBool _)         = (st, TBool)
+infer st gamma (EVar x)        = error "TBD"
 infer st gamma (ELam x body)   = error "TBD: infer ELam"
 infer st gamma (EApp e1 e2)    = error "TBD: infer EApp"
 infer st gamma (ELet x e1 e2)  = error "TBD: infer ELet"
